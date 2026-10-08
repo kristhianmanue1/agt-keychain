@@ -43,7 +43,8 @@ from llavero_core import (
 MAX_RESPONSE_BYTES = 1024 * 1024
 
 
-def cmd_store(credential_id: str, environment_source: str | None, replace: bool = False) -> int:
+def cmd_store(credential_id: str, environment_source: str | None,
+              replace: bool = False, icloud: bool = False) -> int:
     validate_identifier(credential_id)
     if environment_source:
         validate_environment_name(environment_source)
@@ -63,19 +64,25 @@ def cmd_store(credential_id: str, environment_source: str | None, replace: bool 
             raise LlaveroError("las entradas no coinciden — nada guardado")
     if not secret:
         raise LlaveroError("credencial vacía — nada guardado")
-    if secret_exists(credential_id) and not replace:
+    if icloud and not core.sync_load_profile(credential_id):
+        raise LlaveroError("crea primero el perfil en iCloud con --icloud perfil")
+    exists = core.sync_secret_exists(credential_id) if icloud else secret_exists(credential_id)
+    if exists and not replace:
         raise LlaveroError("ya existe: usa --replace para sustituir explícitamente")
-    if not store_secret(credential_id, secret, update=replace):
+    stored = (core.sync_store_secret(credential_id, secret, update=replace)
+              if icloud else store_secret(credential_id, secret, update=replace))
+    if not stored:
         raise LlaveroError("no se pudo guardar y verificar la credencial; el estado de Keychain debe comprobarse")
     print(
         f"llavero: credencial guardada para '{credential_id}' "
-        f"(origen: {source})"
+        f"(origen: {source}; almacén: {'iCloud' if icloud else 'local'})"
     )
     return 0
 
 
-def cmd_status(credential_id: str) -> int:
-    if not secret_exists(credential_id):
+def cmd_status(credential_id: str, icloud: bool = False) -> int:
+    exists = core.sync_secret_exists(credential_id) if icloud else secret_exists(credential_id)
+    if not exists:
         print(
             f"llavero: no existe credencial para '{credential_id}'",
             file=sys.stderr,
@@ -85,10 +92,12 @@ def cmd_status(credential_id: str) -> int:
     return 0
 
 
-def cmd_delete(credential_id: str) -> int:
-    if delete_secret(credential_id):
-        print(f"llavero: entrada local de '{credential_id}' eliminada")
-        print("llavero: recuerda que eliminar localmente no revoca al proveedor")
+def cmd_delete(credential_id: str, icloud: bool = False) -> int:
+    deleted = core.sync_delete_secret(credential_id) if icloud else delete_secret(credential_id)
+    if deleted:
+        location = "iCloud (se propagará a otros dispositivos)" if icloud else "local"
+        print(f"llavero: entrada {location} de '{credential_id}' eliminada")
+        print("llavero: eliminar la entrada no revoca la credencial ante el proveedor")
         return 0
     print("llavero: no se pudo eliminar la entrada local", file=sys.stderr)
     return 1
@@ -105,9 +114,9 @@ def _parse_public_environment(values: list[str]) -> dict[str, str]:
     return result
 
 
-def cmd_profile(credential_id: str, args) -> int:
+def cmd_profile(credential_id: str, args, icloud: bool = False) -> int:
     validate_identifier(credential_id)
-    profile = load_profile(credential_id)
+    profile = core.sync_load_profile(credential_id) if icloud else load_profile(credential_id)
     existing_profile = bool(profile)
     for field in ("base_url", "modelo", "api"):
         value = getattr(args, field, None)
@@ -135,8 +144,12 @@ def cmd_profile(credential_id: str, args) -> int:
             "secret_env": secret_env,
             "public_env": public_env,
         }
-    path = save_profile(credential_id, profile)
-    print(f"llavero: perfil público de '{credential_id}' en {path} (0600)")
+    if icloud:
+        core.sync_save_profile(credential_id, profile)
+        print(f"llavero: perfil público de '{credential_id}' en iCloud Keychain")
+    else:
+        path = save_profile(credential_id, profile)
+        print(f"llavero: perfil público de '{credential_id}' en {path} (0600)")
     print(json.dumps(profile, ensure_ascii=False, indent=2))
     return 0
 
@@ -159,8 +172,9 @@ def cmd_test(
     base_url: str | None,
     model: str | None,
     timeout: float,
+    icloud: bool = False,
 ) -> int:
-    profile = load_profile(credential_id)
+    profile = core.sync_load_profile(credential_id) if icloud else load_profile(credential_id)
     endpoint = _resolved_endpoint(base_url, profile)
     if not math.isfinite(timeout) or not 0 < timeout <= 300:
         raise LlaveroError("timeout debe estar entre 0 y 300 segundos")
@@ -170,7 +184,7 @@ def cmd_test(
     if not model:
         raise LlaveroError("falta modelo — define el perfil primero")
     validate_public_text("modelo", model)
-    secret = read_secret(credential_id)
+    secret = core.sync_read_secret(credential_id) if icloud else read_secret(credential_id)
     if secret is None:
         raise LlaveroError(f"no existe credencial para '{credential_id}'")
     payload_data = {
@@ -281,14 +295,14 @@ def cmd_test(
     return 0
 
 
-def cmd_run(credential_id: str, command: list[str]) -> int:
+def cmd_run(credential_id: str, command: list[str], icloud: bool = False) -> int:
     executable = command[0]
     if not os.path.isabs(executable):
         raise LlaveroError("el consumidor debe indicarse con ruta absoluta")
     executable = os.path.realpath(executable)
     if not os.path.isfile(executable) or not os.access(executable, os.X_OK):
         raise LlaveroError("el consumidor no es un archivo ejecutable")
-    profile = load_profile(credential_id)
+    profile = core.sync_load_profile(credential_id) if icloud else load_profile(credential_id)
     if not profile:
         raise LlaveroError("falta perfil explícito para el consumidor")
     with open(executable, "rb") as handle:
@@ -302,7 +316,7 @@ def cmd_run(credential_id: str, command: list[str]) -> int:
         interpreter = os.fsdecode(shebang)
         if not os.path.isfile(interpreter) or not os.access(interpreter, os.X_OK):
             raise LlaveroError("el intérprete del consumidor no es ejecutable")
-    secret = read_secret(credential_id)
+    secret = core.sync_read_secret(credential_id) if icloud else read_secret(credential_id)
     if secret is None:
         raise LlaveroError(f"no existe credencial para '{credential_id}'")
     environment = build_consumer_environment(profile, secret)
@@ -315,8 +329,8 @@ def cmd_run(credential_id: str, command: list[str]) -> int:
         ) from exc
 
 
-def cmd_validate(credential_id: str) -> int:
-    profile = load_profile(credential_id)
+def cmd_validate(credential_id: str, icloud: bool = False) -> int:
+    profile = core.sync_load_profile(credential_id) if icloud else load_profile(credential_id)
     if not profile:
         raise LlaveroError("perfil inexistente")
     print(json.dumps({"credential_id": credential_id, "valid": True,
@@ -326,7 +340,11 @@ def cmd_validate(credential_id: str) -> int:
     return 0
 
 
-def cmd_list() -> int:
+def cmd_list(icloud: bool = False) -> int:
+    if icloud:
+        for credential_id in core.sync_list_profiles():
+            cmd_validate(credential_id, icloud=True)
+        return 0
     core._validate_existing_config_directory()
     for path in sorted(core.CONFIG_DIR.glob("*.json")):
         # Do not print arbitrary filenames, values or malformed profile contents.
@@ -343,13 +361,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="llavero", description=__doc__.splitlines()[0]
     )
+    parser.add_argument("--icloud", action="store_true",
+                        help="usa entradas sincronizables mediante el helper firmado")
     sub = parser.add_subparsers(dest="command_name", required=True)
 
     command = sub.add_parser("listar", help="lista perfiles públicos sin consultar secretos")
-    command.set_defaults(function=lambda args: cmd_list())
+    command.set_defaults(function=lambda args: cmd_list(args.icloud))
     command = sub.add_parser("validar", help="valida configuración sin red ni Keychain")
     command.add_argument("credential_id")
-    command.set_defaults(function=lambda args: cmd_validate(args.credential_id))
+    command.set_defaults(function=lambda args: cmd_validate(args.credential_id, args.icloud))
 
     command = sub.add_parser("guardar", help="captura y almacena una credencial")
     command.add_argument("credential_id")
@@ -359,16 +379,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     command.add_argument("--replace", action="store_true", help="sustituye una entrada existente")
     command.set_defaults(
-        function=lambda args: cmd_store(args.credential_id, args.des_entorno, args.replace)
+        function=lambda args: cmd_store(args.credential_id, args.des_entorno, args.replace, args.icloud)
     )
 
     command = sub.add_parser("ver", help="confirma presencia sin revelar metadatos")
     command.add_argument("credential_id")
-    command.set_defaults(function=lambda args: cmd_status(args.credential_id))
+    command.set_defaults(function=lambda args: cmd_status(args.credential_id, args.icloud))
 
     command = sub.add_parser("borrar", help="elimina la entrada local")
     command.add_argument("credential_id")
-    command.set_defaults(function=lambda args: cmd_delete(args.credential_id))
+    command.set_defaults(function=lambda args: cmd_delete(args.credential_id, args.icloud))
 
     command = sub.add_parser("perfil", help="configura datos públicos del consumidor")
     command.add_argument("credential_id")
@@ -384,7 +404,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--env", action="append", default=[], metavar="NAME=VALUE",
         help="variable pública explícita; repetible",
     )
-    command.set_defaults(function=lambda args: cmd_profile(args.credential_id, args))
+    command.set_defaults(function=lambda args: cmd_profile(args.credential_id, args, args.icloud))
 
     command = sub.add_parser("probar", help="prueba el protocolo configurado, una llamada sin reintentos")
     command.add_argument("credential_id")
@@ -392,14 +412,14 @@ def build_parser() -> argparse.ArgumentParser:
     command.add_argument("--modelo")
     command.add_argument("--timeout", type=float, default=30.0)
     command.set_defaults(function=lambda args: cmd_test(
-        args.credential_id, args.base_url, args.modelo, args.timeout
+        args.credential_id, args.base_url, args.modelo, args.timeout, args.icloud
     ))
 
     command = sub.add_parser("ejecutar", help="ejecuta con delivery env/v1")
     command.add_argument("credential_id")
     command.add_argument("consumer_command", nargs="+")
     command.set_defaults(function=lambda args: cmd_run(
-        args.credential_id, args.consumer_command
+        args.credential_id, args.consumer_command, args.icloud
     ))
     return parser
 

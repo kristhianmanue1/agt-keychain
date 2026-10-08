@@ -1,0 +1,2 @@
+# AN-KLA agent context for this checkout; observed tag commit: fcc6dce45921858617b42fb1cfcaf288873ab489
+an-kla-memory @ git+https://github.com/kristhianmanue1/an-kla-memory.git@v0.1.0-beta.28

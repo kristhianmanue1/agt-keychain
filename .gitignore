@@ -1,5 +1,7 @@
 .DS_Store
 .memos/
+.an-kla/
+.venv/
 __pycache__/
 *.py[cod]
 .env

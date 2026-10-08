@@ -164,6 +164,17 @@ verificado contra lectura cruzada por otros procesos de la misma cuenta.
 
 Eliminar una entrada local no revoca la credencial en el proveedor.
 
+### Sincronización iCloud: implementación local pendiente de activación
+
+`--icloud` selecciona una ruta separada para perfiles y credenciales nuevas.
+Requiere un helper macOS firmado con identidad Apple Developer estable y
+aprovisionamiento para el llavero de protección de datos. Sin ese helper falla
+cerrado; no cambia ni migra las entradas existentes del llavero `login`.
+La disponibilidad en otra Mac requiere iCloud Keychain activo, el mismo Apple
+Account y una instalación del helper con la misma identidad de firma.
+Consulta [diseño y límites de iCloud](docs/icloud-sync.md). La escritura local
+con lectura posterior no demuestra que Apple haya completado la sincronización.
+
 `guardar --des-entorno VAR` permanece sólo para migración o CI y se identifica
 como modo degradado. Llavero elimina esa variable de su propio entorno antes de
 invocar Keychain y no la hereda al subproceso.
@@ -175,6 +186,28 @@ invocar Keychain y no la hereda al subproceso.
 
 El contrato continúa **PROPUESTO — NO ADOPTADO**. Esta Fase 1 implementa un
 subconjunto defensivo; no reclama conformidad completa.
+
+## Contexto de agentes con AN-KLA
+
+Este checkout usa AN-KLA como memoria local de trabajo de agentes. No forma
+parte del runtime de Llavero ni almacena credenciales. La integración se define
+en `AGENTS.md` y `AN-KLA.md`; el store `.an-kla/` permanece local y está excluido
+de Git. Para reproducir la instalación desde la etiqueta fijada:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements-an-kla.txt
+.venv/bin/python -m an_kla --project-root . init
+.venv/bin/python -m an_kla --project-root . context status
+.venv/bin/python -m an_kla --project-root . verify
+```
+
+En una copia donde falte el bloque gestionado, ejecuta primero
+`context plan --operation install` y después `context install`. No vuelvas a
+ejecutar `context install` encima de archivos administrados modificados. En un
+clon nuevo con `AGENTS.md` y `AN-KLA.md` versionados pero sin `.an-kla/`, el
+aviso `context_manifest_missing` es esperable: el manifiesto es local y el
+bloque canónico sigue verificándose por su contenido.
 
 ## Pruebas
 

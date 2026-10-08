@@ -7,6 +7,8 @@ compatibility mechanism: the consumer and its descendants can read the secret.
 from __future__ import annotations
 
 import errno
+import base64
+import binascii
 import hmac
 import ipaddress
 import json
@@ -31,6 +33,8 @@ SECURITY_BIN = "/usr/bin/security"
 CONFIG_DIR = pathlib.Path.home() / ".config" / "llavero"
 PROFILE_SCHEMA = "llavero/profile/v1"
 PROVIDER_SCHEMA = "llavero/profile/v2"
+SYNC_HELPER = pathlib.Path.home() / ".local/libexec/LlaveroSync.app/Contents/MacOS/llavero-sync"
+SYNC_HELPER_IDENTITY = CONFIG_DIR / "icloud-helper.json"
 
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 _ENV_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
@@ -64,6 +68,129 @@ _SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 class LlaveroError(ValueError):
     """Expected, safely printable validation or configuration failure."""
+
+
+def _verify_sync_helper() -> None:
+    """Reject an unsigned or differently signed executable before sending data."""
+    _validate_existing_config_directory()
+    try:
+        metadata = SYNC_HELPER_IDENTITY.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or SYNC_HELPER_IDENTITY.is_symlink():
+            raise LlaveroError("configuración de identidad iCloud inválida")
+        if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise LlaveroError("configuración de identidad iCloud requiere modo 0600")
+        identity = json.loads(SYNC_HELPER_IDENTITY.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise LlaveroError("falta configuración de identidad del helper iCloud") from exc
+    except (OSError, ValueError) as exc:
+        raise LlaveroError("configuración de identidad iCloud inválida") from exc
+    if not isinstance(identity, dict) or set(identity) != {"team_id", "identifier"}:
+        raise LlaveroError("configuración de identidad iCloud inválida")
+    team = identity["team_id"]
+    identifier = identity["identifier"]
+    if not isinstance(team, str) or not re.fullmatch(r"[A-Z0-9]{10}", team):
+        raise LlaveroError("team_id de iCloud inválido")
+    if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9.-]{3,128}", identifier):
+        raise LlaveroError("identificador del helper iCloud inválido")
+    if not SYNC_HELPER.is_file() or SYNC_HELPER.is_symlink() or not os.access(SYNC_HELPER, os.X_OK):
+        raise LlaveroError("falta el helper iCloud firmado e instalado")
+    requirement = (f'anchor apple generic and identifier "{identifier}" '
+                   f'and certificate leaf[subject.OU] = "{team}"')
+    try:
+        result = subprocess.run(
+            ["/usr/bin/codesign", "--verify", "--strict", "-R", requirement,
+             str(SYNC_HELPER)], capture_output=True, check=False,
+            timeout=10, env=minimal_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise LlaveroError("no se pudo verificar la firma del helper iCloud") from exc
+    if result.returncode != 0:
+        raise LlaveroError("firma del helper iCloud no coincide con la identidad configurada")
+
+
+def _sync_request(operation: str, kind: str, credential_id: str | None = None,
+                  data: bytes | None = None, replace: bool = False) -> dict:
+    """Call the provisioned helper through pipes, never placing data in argv."""
+    _verify_sync_helper()
+    request = {"operation": operation, "kind": kind}
+    if credential_id is not None:
+        request["identifier"] = validate_identifier(credential_id)
+    if data is not None:
+        request["data"] = base64.b64encode(data).decode("ascii")
+        request["replace"] = replace
+    try:
+        result = subprocess.run(
+            [str(SYNC_HELPER)], input=json.dumps(request), text=True,
+            capture_output=True, timeout=30, check=False, env=minimal_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise LlaveroError("helper iCloud no disponible; estado de escritura incierto") from exc
+    try:
+        response = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise LlaveroError("respuesta inválida del helper iCloud") from exc
+    if not isinstance(response, dict) or response.get("ok") is not True or result.returncode != 0:
+        if isinstance(response, dict) and response.get("status") == -34018:
+            raise LlaveroError("helper iCloud sin entitlement válido de Keychain")
+        if isinstance(response, dict) and response.get("error") == "already_exists":
+            raise LlaveroError("ya existe en iCloud; usa --replace para sustituir")
+        raise LlaveroError("operación de iCloud Keychain falló; comprueba firma y sesión iCloud")
+    return response
+
+
+def sync_secret_exists(credential_id: str) -> bool:
+    return _sync_request("exists", "secret", credential_id).get("found") is True
+
+
+def sync_read_secret(credential_id: str) -> str | None:
+    response = _sync_request("get", "secret", credential_id)
+    if response.get("found") is False:
+        return None
+    try:
+        secret = base64.b64decode(response["data"], validate=True).decode("utf-8")
+        return validate_secret(secret)
+    except (KeyError, ValueError, UnicodeError, binascii.Error) as exc:
+        raise LlaveroError("credencial iCloud inválida") from exc
+
+
+def sync_store_secret(credential_id: str, secret: str, update: bool = False) -> bool:
+    validate_secret(secret)
+    _sync_request("put", "secret", credential_id, secret.encode("utf-8"), update)
+    saved = sync_read_secret(credential_id)
+    return saved is not None and hmac.compare_digest(saved.encode("utf-8"), secret.encode("utf-8"))
+
+
+def sync_delete_secret(credential_id: str) -> bool:
+    return _sync_request("delete", "secret", credential_id).get("deleted") is True
+
+
+def sync_load_profile(credential_id: str) -> dict:
+    response = _sync_request("get", "profile", credential_id)
+    if response.get("found") is False:
+        return {}
+    try:
+        raw = base64.b64decode(response["data"], validate=True)
+        profile = json.loads(raw)
+    except (KeyError, ValueError, UnicodeError, binascii.Error) as exc:
+        raise LlaveroError("perfil iCloud inválido") from exc
+    return _validate_profile(profile)
+
+
+def sync_save_profile(credential_id: str, profile: dict) -> None:
+    profile = dict(profile)
+    profile.setdefault("schema", PROFILE_SCHEMA)
+    _validate_profile(profile)
+    data = json.dumps(profile, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    _sync_request("put", "profile", credential_id, data, replace=True)
+    if sync_load_profile(credential_id) != profile:
+        raise LlaveroError("perfil iCloud no coincide tras la escritura")
+
+
+def sync_list_profiles() -> list[str]:
+    identifiers = _sync_request("list", "profile").get("identifiers")
+    if not isinstance(identifiers, list) or any(not isinstance(item, str) for item in identifiers):
+        raise LlaveroError("lista iCloud inválida")
+    return [validate_identifier(item) for item in identifiers]
 
 
 def validate_identifier(value: str) -> str:
