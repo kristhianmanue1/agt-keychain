@@ -1,0 +1,13 @@
+{
+  "schema": "skevi/script-install/v1",
+  "version": "gate/v8",
+  "files": {
+    "check_sizes.py": "sha256:656191fc16119edfa291e9ac1c0a48d79fc8da097bbc373c63ab8593bc5d5b7f",
+    "check_plans.py": "sha256:e6bff6446f2c5e73315cb4fafec904d5040d70195f67bbefa4a7597f9a14553d",
+    "check_reports.py": "sha256:5663866d6575765be22353f9587c743005f3e612153efd492279b68bf0a0f21c",
+    "check_templates.py": "sha256:f021ba190bc5eba4c19f363417a94403fcb9f59f09aff867e3adfd7f0dfa35fe"
+  },
+  "installed_at": "2026-10-08T20:11:48Z",
+  "source": "https://github.com/kristhianmanue1/skevi@d7a80b26962cd66a806943ff46f779de14c16708",
+  "customized": []
+}

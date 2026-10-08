@@ -209,6 +209,16 @@ clon nuevo con `AGENTS.md` y `AN-KLA.md` versionados pero sin `.an-kla/`, el
 aviso `context_manifest_missing` es esperable: el manifiesto es local y el
 bloque canónico sigue verificándose por su contenido.
 
+## Método de desarrollo Skevi
+
+Se adoptó el corpus de Skevi fijado al SHA y versiones declarados en `.skevi/`.
+El [registro de uso](.skevi/usage-guide.md) delimita qué se aplica a Llavero,
+qué verifican los scripts y qué permanece inactivo. El gate de estructura se
+ejecuta con `python3 scripts/check_sizes.py`; su resultado no prueba seguridad
+del Keychain ni sincronización entre Macs. El workflow de CI verifica también
+la suite de Llavero y la sintaxis Swift, pero no sustituye la validación con
+un helper firmado y dos equipos.
+
 ## Pruebas
 
 ```bash

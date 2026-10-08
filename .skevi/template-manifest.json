@@ -1,0 +1,104 @@
+{
+  "schema": "skevi/template-manifest/v1",
+  "version": "plantillas/v10",
+  "generated_at": "2026-09-18T18:18:29Z",
+  "files": {
+    "architecture-overview.md": "sha256:c7a03679ec978ff609e6216cc63b5043eeb185424895083970b399ac9912b2d3",
+    "corpus-installed.json": "sha256:b4e739927bd8551defd99940f9878b1b3502496f88853a1052eab41aa429e10b",
+    "frozen-trees.md": "sha256:768a87e69ef7da18b276f27d77d7cb2e492fb2eba2a55ae483d6d9b21d32751b",
+    "installed.json": "sha256:f8d9dfeb63253e55590494284971c686860b4dbc5b35378b2f5ad1103b9c520b",
+    "plan-de-implementacion.md": "sha256:f93a8435757af5f65fe166737a87ea880928844efe4637df554f5b8c09b6b073",
+    "registro-contexto.md": "sha256:60c768b449a416fa8727b1bf2515caecab0e9962111cc97a2d203f922fdc3227",
+    "scripts-installed.json": "sha256:629579404162abfc464475db482b1c426ec3bc0f1edbd81f87eac39fa65f6716",
+    "usage-guide.md": "sha256:52ee31a1064a9f79edafee750518fe06a040431f508711f80c422de0643cd332"
+  },
+  "history": [
+    {
+      "from": "plantillas/v1",
+      "to": "plantillas/v2",
+      "breaking": false,
+      "changes": {
+        "scripts-installed.json": "nuevo archivo: plantilla de registro de instalación para scripts/ (ADR-028)"
+      }
+    },
+    {
+      "from": "plantillas/v2",
+      "to": "plantillas/v3",
+      "breaking": false,
+      "changes": {
+        "usage-guide.md": "elecciones explícitas de idiomas conforme a ADR-029",
+        "installed.json": "versión de ejemplo alineada con la plantilla vigente",
+        "scripts-installed.json": "versión de ejemplo alineada con gate/v3"
+      }
+    },
+    {
+      "from": "plantillas/v3",
+      "to": "plantillas/v4",
+      "breaking": false,
+      "changes": {
+        "scripts-installed.json": "ejemplo de versión alineado con gate/v4 (ADR-030)"
+      }
+    },
+    {
+      "from": "plantillas/v4",
+      "to": "plantillas/v5",
+      "breaking": false,
+      "changes": {
+        "installed.json": "placeholder de source con formato cerrado <origen>@<revisión> (ADR-031); ejemplo a plantillas/v5",
+        "scripts-installed.json": "placeholder de source con formato cerrado (ADR-031); ejemplo a gate/v5"
+      }
+    },
+    {
+      "from": "plantillas/v5",
+      "to": "plantillas/v6",
+      "breaking": false,
+      "changes": {
+        "usage-guide.md": "secciones de drift, gate de push y dependencias activas (#42, #41.3)",
+        "corpus-installed.json": "nuevo: registro de instalación del corpus (ADR-032)",
+        "installed.json": "ejemplo de versión alineado con plantillas/v6",
+        "scripts-installed.json": "ejemplo de versión alineado con gate/v6"
+      }
+    },
+    {
+      "from": "plantillas/v6",
+      "to": "plantillas/v7",
+      "breaking": false,
+      "changes": {
+        "frozen-trees.md": "nuevo: complemento de adopción para árboles congelados (ADR-033, PROP-009)",
+        "usage-guide.md": "puntero a la plantilla opcional de árboles congelados"
+      }
+    },
+    {
+      "from": "plantillas/v7",
+      "to": "plantillas/v8",
+      "breaking": false,
+      "changes": {
+        "usage-guide.md": "gate en CI opcional (comandos, control positivo, check requerido) junto al hook local; aclara que el chequeo de drift compara contra la copia local del manifest, no contra el origen en vivo (hallazgo de ronda adversarial sobre ADR-034)",
+        "installed.json": "version actualizada a plantillas/v8, sincronizada con este salto (hallazgo de ronda adversarial: quedaba en v6 con el manifest ya en v7)",
+        "corpus-installed.json": "version actualizada a corpus/v2, sincronizada con el salto del corpus de esta misma ronda"
+      }
+    },
+    {
+      "from": "plantillas/v8",
+      "to": "plantillas/v9",
+      "breaking": false,
+      "changes": {
+        "plan-de-implementacion.md": "entra al manifiesto desde templates/ raíz: hogar único y señal de drift (ADR-036, issue #48)",
+        "registro-contexto.md": "entra al manifiesto desde templates/ raíz (ADR-036, issue #48)",
+        "installed.json": "ejemplo de versión alineado con plantillas/v9",
+        "scripts-installed.json": "ejemplo de versión alineado con gate/v7",
+        "corpus-installed.json": "ejemplo de versión alineado con corpus/v3"
+      }
+    },
+    {
+      "from": "plantillas/v9",
+      "to": "plantillas/v10",
+      "breaking": false,
+      "changes": {
+        "corpus-installed.json": "ejemplo de versión alineado con corpus/v4",
+        "installed.json": "ejemplo de versión alineado con plantillas/v10",
+        "scripts-installed.json": "ejemplo de versión alineado con gate/v8"
+      }
+    }
+  ]
+}

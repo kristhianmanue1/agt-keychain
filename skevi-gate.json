@@ -1,0 +1,50 @@
+{
+  "required": [
+    "AGENTS.md",
+    "AN-KLA.md",
+    "README.md",
+    ".skevi/usage-guide.md",
+    ".skevi/architecture-overview.md",
+    ".skevi/installed.json",
+    ".skevi/scripts-installed.json",
+    ".skevi/corpus-installed.json",
+    ".skevi/template-manifest.json",
+    "docs/estandar-diseno-software-github.md",
+    "docs/skevi-adoption.md",
+    "docs/ai-agent-guide/00-INDICE.md",
+    "docs/ai-agent-guide/01-analisis-y-requerimientos.md",
+    "docs/ai-agent-guide/02-specs-adr-contratos.md",
+    "docs/ai-agent-guide/03-cascaron-proyecto.md",
+    "docs/ai-agent-guide/04-ejecucion-y-verificacion.md",
+    "docs/ai-agent-guide/05-memoria-del-agente.md",
+    "docs/ai-agent-guide/06-componentes-con-llm.md",
+    "docs/MANIFEST.json",
+    "scripts/check_sizes.py",
+    "scripts/check_plans.py",
+    "scripts/check_reports.py",
+    "scripts/check_templates.py",
+    "scripts/MANIFEST.json"
+  ],
+  "root_markdown": ["AN-KLA.md"],
+  "skip_dirs": [".memos"],
+  "exempt_names": [".DS_Store"],
+  "limits": {"scripts/check_sizes.py": 870},
+  "reading_path": {
+    "limit": 1600,
+    "files": [
+      "AGENTS.md",
+      ".skevi/usage-guide.md",
+      ".skevi/architecture-overview.md",
+      "docs/ai-agent-guide/00-INDICE.md",
+      "docs/estandar-diseno-software-github.md",
+      "docs/ai-agent-guide/05-memoria-del-agente.md",
+      "AN-KLA.md"
+    ],
+    "worst_case_of": [
+      "docs/ai-agent-guide/01-analisis-y-requerimientos.md",
+      "docs/ai-agent-guide/02-specs-adr-contratos.md",
+      "docs/ai-agent-guide/03-cascaron-proyecto.md",
+      "docs/ai-agent-guide/04-ejecucion-y-verificacion.md"
+    ]
+  }
+}
