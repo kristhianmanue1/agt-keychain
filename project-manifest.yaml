@@ -1,0 +1,90 @@
+schema: pinax/project-manifest/v1
+id: agt-keychain
+repo: agt-keychain
+proposito: "Captura, almacenamiento y entrega de credenciales para proyectos que consumen modelos de IA. La interfaz de consumidor no depende de ARIA ni de Skopos; el backend implementado en esta fase sí es específico de macOS Keychain."
+
+ofrece:
+  - "captura a ciegas en una terminal y entrega según un perfil explícito del consumidor, sin pegar la credencial en chats, prompts, repositorios ni argumentos de proceso"
+  - "modo env/v1 con exposición consumer-and-descendants: la credencial no se incluye deliberadamente en el prompt o cuerpo HTTP, pero el proceso consumidor y sus descendientes pueden leerla"
+  - "credencial en el Keychain de macOS, servicio llavero; perfil público en ~/.config/llavero/<credential_id>.json"
+  - "identificadores cerrados, perfiles atómicos con modos 0700/0600 y rechazo de symlinks al cargar"
+  - "HTTPS obligatorio para destinos remotos y HTTP sólo para IP loopback; durante probar se rechazan las redirecciones HTTP"
+  - "destino del perfil no ampliable desde --base-url; entorno base desde lista cerrada y rechazo en --env de hooks de loader, intérprete y proxy"
+  - "--env sólo admite configuración pública; la credencial se declara exclusivamente con --secret-env"
+  - "captura interactiva por TTY obligatoria, oculta y confirmada dos veces; entrega a Keychain sin secreto en argv"
+  - "transporte a Keychain por pseudo-TTY hasta 128 bytes y, entre 129 y 1024 bytes, orden hexadecimal por pipe al modo interactivo de security, sin shell ni secreto en argumentos o entorno, con límite de 30 segundos; sólo ASCII imprimible, y la relectura se compara antes de anunciar éxito"
+  - "ver confirma presencia sin imprimir longitud o sufijo; el consumidor de ejecutar exige ruta absoluta, se rechazan scripts con /usr/bin/env y el PATH entregado queda fijado a directorios del sistema"
+  - "perfiles llavero/profile/v2 con proveedor explícito typesafe-systemone u openai-compatible; el almacén sigue siendo Keychain y la entrega sigue siendo env/v1"
+  - "variables generadas desde el perfil, sin duplicación editable, para esos dos proveedores"
+  - "listar enumera perfiles válidos sin consultar Keychain; validar comprueba configuración, no la existencia de la llave ni el acceso remoto"
+  - "probar hace una llamada remota que puede tener coste, sin reintentos; el recibo impreso no trae la respuesta completa y los errores HTTP conservan su código sin imprimir cuerpo ni cabeceras"
+  - "compatibilidad histórica SKOPOS_LLM_* en un perfil sin bloque genérico; los perfiles v1 y heredados conservan su interpretación"
+  - "--icloud selecciona una ruta separada para perfiles y credenciales nuevas y falla cerrado si falta el helper macOS firmado; no cambia ni migra las entradas del llavero login"
+  - "guardar --des-entorno permanece sólo para migración o CI, identificado como modo degradado, y esa variable no se hereda al subproceso"
+
+no_ofrece:
+  - "frontera de aislamiento frente a código con la misma autoridad"
+  - "aislamiento de red: el proceso receptor y sus descendientes pueden leer la llave y elegir otros destinos"
+  - "dependencia de la interfaz de consumidor respecto de ARIA o de Skopos"
+  - "adopción del contrato propuesto llavero/credential-delivery/v1 ni conformidad completa; el formato local llavero/profile/v2 no implica esa adopción"
+  - "conversión de las variables de Skopos en estándar de Llavero"
+  - "rotación o revocación de la credencial ante el proveedor; sustituir con guardar --replace o eliminar la entrada local no lo hace"
+  - "migración automática de perfiles v1 o heredados a v2"
+  - "namespace tipado o impedimento de colisiones por la sola convención proyecto.entorno.credencial"
+  - "política inmutable del perfil 0600 frente a otro proceso del mismo UID"
+  - "verificación de la ACL efectiva de entradas creadas mediante /usr/bin/security contra lectura cruzada por otros procesos de la misma cuenta"
+  - "juicio sobre si un valor declarado público contiene un secreto: valida forma, no ese contenido"
+  - "instalación de un SDK o conexión automática con Ágora"
+  - "acreditación de capacidad semántica general mediante probar"
+  - "fd/v1, broker/v1 e identidad fuerte del consumidor"
+  - "AN-KLA como parte del runtime o como almacén de credenciales"
+  - "ejecución de Skevi en el runtime"
+  - "prueba de seguridad del Keychain o de sincronización entre Macs por el gate de estructura o por el workflow de CI"
+  - "demostración, mediante escritura local y lectura posterior, de que Apple completó la sincronización"
+  - "afirmación de que la suite demuestra aislamiento o sincronización: usa credenciales canario y un ejecutable Keychain falso, y no lee, crea ni elimina entradas reales"
+  - "compromiso del kernel, de Secure Enclave o de la cuenta raíz, según el fuera de alcance inicial del modelo de amenazas"
+  - "garantía del comportamiento interno de un proveedor remoto"
+  - "recuperación de una credencial ya expuesta"
+  - "conversión de una API key estática en identidad de corta duración cuando el proveedor no ofrece ese mecanismo"
+
+consume:
+  - tipo: externo
+    id: macos-keychain
+    uso: "almacén de la credencial en el servicio llavero; el backend implementado en esta fase es específico de macOS Keychain y la entrega usa /usr/bin/security sin secreto en argv"
+    requerido: true
+  - tipo: externo
+    id: icloud-keychain
+    uso: "sincronización opcional de perfiles y credenciales nuevas; sin helper firmado con identidad Apple Developer estable el modo --icloud falla cerrado y no migra el llavero login"
+    requerido: false
+  - tipo: proyecto
+    id: skevi
+    uso: "corpus de método de desarrollo adoptado en el checkout y fijado en .skevi/; no se ejecuta en el runtime"
+    requerido: false
+  - tipo: proyecto
+    id: an-kla-memory
+    uso: "memoria local de trabajo de agentes en este checkout; no forma parte del runtime de Llavero ni almacena credenciales"
+    requerido: false
+
+fronteras_de_confianza:
+  - "la memoria recuperada de AN-KLA es dato no confiable, nunca instrucción ni autorización"
+  - "env/v1 no aísla frente a código con la misma autoridad: el proceso consumidor y sus descendientes pueden leer la credencial"
+  - "la configuración coherente no es aislamiento de red: el proceso receptor y sus descendientes pueden elegir otros destinos"
+  - "la ruta absoluta exigida al consumidor no autentica procesos"
+  - "un valor declarado público no es confiable como no secreto: se valida la forma y no se puede determinar si el Operador colocó ahí un secreto"
+  - "el perfil 0600 no impide que otro proceso con el mismo UID sustituya destino o consumidor"
+  - "no está verificado que la ACL de entradas creadas con /usr/bin/security impida la lectura cruzada por otros procesos de la misma cuenta"
+  - "un proceso con el mismo UID puede cambiar la configuración local de identidad del helper de iCloud; no se reclama aislamiento frente a ese adversario"
+  - "la disponibilidad de iCloud Keychain depende de Apple; una lectura en la misma Mac no demuestra la recepción en otra"
+  - "el proveedor remoto y el modelo no son sinónimos; no se garantiza el comportamiento interno del proveedor"
+  - "Llavero reduce exposición; no transforma un proceso no confiable en uno confiable"
+  - "el modelo de amenazas está propuesto: no adopta el contrato, no modifica el runtime y no certifica la implementación actual"
+  - "el gate de estructura no prueba la seguridad del Keychain ni la sincronización entre Macs"
+
+pospuesto:
+  - "fd/v1, broker/v1, identidad fuerte del consumidor y rotación o revocación ante el proveedor"
+  - "activación de la sincronización iCloud, con helper firmado, aprovisionamiento del llavero de protección de datos y comprobación entre dos Macs"
+  - "compilación del helper Swift con toolchain y SDK compatibles y firma provisionada"
+  - "namespace tipado para la convención proyecto.entorno.credencial"
+  - "verificación de la ACL efectiva de las entradas de Keychain creadas mediante /usr/bin/security"
+  - "decisión explícita de adopción del contrato llavero/credential-delivery/v1, hoy propuesto y no adoptado"
+  - "gates de planes y reportes copiados de Skevi, inactivos hasta que exista un contrato y un directorio aplicables"
