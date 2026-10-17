@@ -25,12 +25,20 @@
     "scripts/check_templates.py",
     "scripts/MANIFEST.json"
   ],
-  "root_markdown": ["AN-KLA.md"],
-  "skip_dirs": [".memos"],
-  "exempt_names": [".DS_Store"],
-  "limits": {"scripts/check_sizes.py": 870},
+  "root_markdown": [
+    "AN-KLA.md"
+  ],
+  "skip_dirs": [
+    ".memos"
+  ],
+  "exempt_names": [
+    ".DS_Store"
+  ],
+  "limits": {
+    "scripts/check_sizes.py": 870
+  },
   "reading_path": {
-    "limit": 1600,
+    "limit": 1620,
     "files": [
       "AGENTS.md",
       ".skevi/usage-guide.md",

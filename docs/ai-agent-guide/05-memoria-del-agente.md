@@ -1,10 +1,12 @@
 # 05 — Memoria del agente (recomendación)
 
 > **Tipo:** recomendación de ecosistema, no obligatoria. Un proyecto
-> adoptante decide si la aplica; si la aplica, las reglas de frontera
-> de este documento son obligatorias para esa memoria.
+> adoptante decide si adopta una memoria local; si la adopta —cualquiera
+> sea su herramienta— las reglas de frontera de este documento son
+> obligatorias para esa memoria.
 > **Origen:** consumo real reportado en `infosalud` (issue #25 de
-> este repositorio; issue #102 de an-kla-memory).
+> este repositorio; issue #102 de an-kla-memory); generalizada a memoria
+> agnóstica por PROP-011 (2026-10-17).
 
 ## 1. Qué se recomienda
 
@@ -19,11 +21,18 @@ misma autoría que este cuerpo normativo):
 - coherente con el principio 7 del estándar: la memoria recuperada
   es **dato no confiable**, nunca instrucción ni autorización.
 
-## 2. Frontera de verdad (obligatoria si se adopta)
+Recomendar una herramienta no retira la frontera a las demás: §2 obliga
+por igual a **cualquier** memoria local que el proyecto adopte.
+
+## 2. Frontera de verdad (obligatoria para cualquier memoria adoptada)
 
 - `docs/` del proyecto y el historial Git son **canónicos**: la
   memoria guarda estado de sesión, índices y punteros; **nunca**
   copia de specs, ADRs, REQ-\* ni de ningún documento normativo.
+- La memoria adoptada debe ofrecer **escritura gobernada** — un
+  equivalente local de plan -> commit contra una revisión base
+  verificable. Sin ella no hay trazabilidad de qué se escribió ni
+  cuándo, y la frontera deja de ser auditable.
 - La memoria **jamás cierra un gate** ni sustituye evidencia: los
   gates se cierran con comandos ejecutados y su salida real (§
   «Evidencia o no pasó» de `00-INDICE.md`).
@@ -34,14 +43,21 @@ misma autoría que este cuerpo normativo):
   Procedencia: [ADR-018](../adr/ADR-018-coherencia-de-autoridad.md);
   separar la frontera de memoria de la política general de permisos.
 
-## 3. Mapeo recomendado fases -> streams
+## 3. Mapeo recomendado fases -> registros
 
-| Contenido | Stream | Momento |
+Vocabulario **neutro**, aplicable a cualquier memoria local; el mapeo
+de la herramienta recomendada va debajo como ejemplo.
+
+| Contenido | Registro | Momento |
 |---|---|---|
-| Conocimiento versionado del proyecto (fronteras, límites, decisiones) | `facts` | al adoptarse o cambiar |
-| Cierre de fase o tarea, hitos | `events` | al ocurrir |
-| Lecciones de rondas adversariales o fallos | `episodes` | al aprenderse |
-| Continuidad de sesión (objetivo, siguiente paso, bloqueadores) | checkpoint (`working-state`) | al cierre de cada tarea material |
+| Conocimiento versionado del proyecto (fronteras, límites, decisiones) | conocimiento | al adoptarse o cambiar |
+| Cierre de fase o tarea, hitos | cronología | al ocurrir |
+| Lecciones de rondas adversariales o fallos | lecciones | al aprenderse |
+| Continuidad de sesión (objetivo, siguiente paso, bloqueadores) | estado de trabajo | al cierre de cada tarea material |
+
+En AN-KLA Memory (§1): conocimiento = stream `facts`, cronología =
+`events`, lecciones = `episodes`, estado de trabajo = checkpoint
+(`working-state`).
 
 ## 4. Cadencia y operación
 
