@@ -7,4 +7,6 @@ Llavero** ni autorizan operaciones locales. Los enlaces hacia antecedentes
 históricos no copiados apuntan al commit fijado del origen.
 
 Las decisiones propias de Llavero se registran por separado; su diseño actual
-se identifica en `.skevi/architecture-overview.md`.
+se identifica en `.skevi/architecture-overview.md`. El primer ADR propio de
+Llavero es el [ADR-020](ADR-020-aprobacion-prop-009.md) (aprobación de
+PROP-009 sin inicio de ejecución, 2026-10-17).
