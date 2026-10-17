@@ -7,16 +7,20 @@ Markdown operativo suelto en la raíz.
 
 Copiable sin edición a un proyecto adoptante: si su estructura de archivos
 canónicos, límites o exenciones difiere de la de Skevi, declara
-`skevi-gate.json` en la raíz en vez de editar este script (ADR-006).
+`skevi-gate.json` en la raíz en vez de editar este script (ADR-006). Desde
+gate/v9 (ADR-039) la unidad de copia son los cuatro scripts de scripts/
+juntos: la validación de manifiestos vive en check_templates.py y este
+script la delega por import.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from datetime import date
 from pathlib import Path
+
+import check_templates
 
 
 # Identidad de esta copia del gate (ADR-027). Skevi no puede avisar a un
@@ -24,8 +28,8 @@ from pathlib import Path
 # proyectos ajenos. Lo que sí puede es que la copia diga quién es y cuántos
 # días tiene, en la salida que el adoptante ya ejecuta. Al cambiar el
 # comportamiento del gate se sube GATE_VERSION y se pone la fecha del cambio.
-GATE_VERSION = "gate/v8"
-GATE_GENERATED_AT = "2026-09-18"
+GATE_VERSION = "gate/v11"
+GATE_GENERATED_AT = "2026-10-17"
 GATE_STALE_AFTER_DAYS = 90
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -82,8 +86,6 @@ EXEMPT_PATHS: set[str] = set()
 # Exención por nombre exacto de archivo (ADR-030): basura que Git no
 # versiona, sin declarar su ruta una a una.
 EXEMPT_NAMES: set[str] = set()
-# Basura del SO que el listado ignora; cerrada, nunca config (issue #59).
-LISTING_JUNK = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
 # Presupuesto de la ruta de lectura obligatoria (ADR-021). Vacío =
 # inactivo: §3.4 acota cada archivo por separado, y hasta ADR-021
 # nada acotaba la suma que un ejecutor debe leer antes de actuar.
@@ -98,33 +100,17 @@ DEFAULT_LIMIT = 800
 TEMPLATE_PREFIX = "templates/"
 TEMPLATE_LIMIT = 300
 
-# Manifiesto de plantillas (#28 D1 + enmiendas T09, ADR-020): esquema
-# cerrado, listado exacto de templates/skevi/ y digests vigentes. Condicional
-# a la existencia del MANIFEST: un adoptante sin templates/skevi/ — o con un
-# templates/skevi/ previo a este cambio — no se ve afectado; la exigencia
-# canónica de Skevi sobre sí mismo vive en su `skevi-gate.json` (`required`),
-# no en estos valores por defecto.
-TEMPLATE_MANIFEST_NAME = "MANIFEST.json"
-TEMPLATE_MANIFEST_SCHEMA = "skevi/template-manifest/v1"
-# Segunda familia (ADR-028): mismo check_template_manifest, sobre scripts/
-# en vez de templates/skevi/, validación estricta por directorio.
-SCRIPT_MANIFEST_SCHEMA = "skevi/script-manifest/v1"
-# Tercera familia (ADR-032): el canon normativo (estándar + guía) con
-# digests en docs/MANIFEST.json; sin listado de directorio, porque docs/
-# anida subdirectorios y el contrato de ADR-020 es plano por diseño.
-CORPUS_MANIFEST_SCHEMA = "skevi/corpus-manifest/v1"
-# Namespace por esquema (ADR-028), simétrico con check_templates.py.
-SCHEMA_NAMESPACE = {
-    TEMPLATE_MANIFEST_SCHEMA: "plantillas",
-    SCRIPT_MANIFEST_SCHEMA: "gate",
-    CORPUS_MANIFEST_SCHEMA: "corpus",
-}
-TEMPLATE_MANIFEST_KEYS = {"schema", "version", "generated_at", "files",
-                          "history"}
-TEMPLATE_HISTORY_KEYS = {"from", "to", "breaking", "changes"}
-DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-# Cubre "plantillas/v1" (ADR-020) y "gate/v2" (ADR-028) con una expresión.
-MANIFEST_VERSION_RE = re.compile(r"^[a-z]+/v\d+(\.\d+)*$")
+# Manifiesto de plantillas (#28 D1 + enmiendas T09, ADR-020): el esquema
+# cerrado, el listado exacto y los digests vigentes se validan en
+# check_templates.py, dueño del dominio desde gate/v9 (ADR-039); este
+# gate delega por import. Los alias preservan la superficie que tests y
+# adoptantes importan desde aquí: mover el hogar no es romper la API.
+TEMPLATE_MANIFEST_NAME = check_templates.TEMPLATE_MANIFEST_NAME
+TEMPLATE_MANIFEST_SCHEMA = check_templates.TEMPLATE_MANIFEST_SCHEMA
+SCRIPT_MANIFEST_SCHEMA = check_templates.SCRIPT_MANIFEST_SCHEMA
+CORPUS_MANIFEST_SCHEMA = check_templates.CORPUS_MANIFEST_SCHEMA
+check_template_manifest = check_templates.check_template_manifest
+check_corpus_manifest = check_templates.check_corpus_manifest
 
 # Instantánea de los valores de Skevi, congelada al importar el módulo, antes
 # de que ninguna configuración de proyecto pueda tocarlos. `main()` restaura
@@ -428,201 +414,6 @@ def check_registry_block(relative: Path, text: str) -> list[str]:
     return failures
 
 
-def _check_namespace(version, expected_schema: str, where: str) -> str | None:
-    if not isinstance(version, str):
-        return None
-    # Fail-closed: esquema sin namespace registrado es olvido de
-    # mantenimiento, no motivo para omitir la comprobación.
-    expected_namespace = SCHEMA_NAMESPACE.get(expected_schema)
-    if expected_namespace is None:
-        return f"{where}: {expected_schema} no tiene namespace registrado"
-    if version.startswith(expected_namespace + "/"):
-        return None
-    return (f"{where}: version «{version}» no corresponde al espacio de "
-            f"nombres de {expected_schema} (se espera {expected_namespace}/vN)")
-
-
-def _validate_template_manifest(
-    data, label: str, expected_schema: str = TEMPLATE_MANIFEST_SCHEMA
-) -> list[str]:
-    """Esquema cerrado del MANIFEST (formato de ADR-020, familias en ADR-028).
-    Falla por campo, con motivo fijo, sin volcar contenido. Validación
-    estricta: cada manifiesto se valida contra un único esquema esperado,
-    no contra cualquiera que Skevi reconozca — un manifiesto de scripts no
-    puede colarse donde se espera uno de plantillas."""
-    failures: list[str] = []
-    if not isinstance(data, dict):
-        return [f"{label}: la raíz debe ser un objeto"]
-    missing = sorted(TEMPLATE_MANIFEST_KEYS - set(data))
-    if missing:
-        return [f"{label}: campos obligatorios ausentes: {', '.join(missing)}"]
-    if data.get("schema") != expected_schema:
-        failures.append(
-            f"{label}: schema desconocido (se espera {expected_schema})"
-        )
-    unknown = sorted(set(data) - TEMPLATE_MANIFEST_KEYS)
-    if unknown:
-        failures.append(
-            f"{label}: campo desconocido: {', '.join(unknown)}"
-        )
-        return failures
-    if not isinstance(data["version"], str) \
-            or not MANIFEST_VERSION_RE.match(data["version"]):
-        failures.append(f"{label}: version no coincide con <namespace>/v<n>")
-    else:
-        ns_fallo = _check_namespace(data["version"], expected_schema, label)
-        if ns_fallo:
-            failures.append(ns_fallo)
-    if not isinstance(data["generated_at"], str) or not data["generated_at"]:
-        failures.append(f"{label}: generated_at debe ser texto con fecha")
-    if not isinstance(data["files"], dict) or not data["files"]:
-        failures.append(
-            f"{label}: files debe ser un objeto con entradas"
-        )
-        return failures
-    for name, digest in data["files"].items():
-        if not isinstance(digest, str) or not DIGEST_RE.match(digest):
-            failures.append(
-                f"{label}: files.{name} no es un digest con formato "
-                "sha256:<hex>"
-            )
-    if not isinstance(data["history"], list):
-        failures.append(f"{label}: history debe ser una lista")
-        return failures
-    for index, jump in enumerate(data["history"]):
-        where = f"{label}: history[{index}]"
-        if not isinstance(jump, dict) or set(jump) != TEMPLATE_HISTORY_KEYS:
-            failures.append(
-                f"{where} debe tener exactamente from/to/breaking/changes"
-            )
-            continue
-        for extremo in ("from", "to"):
-            valor = jump[extremo]
-            if extremo == "from" and valor is None:
-                continue
-            if not isinstance(valor, str) or not MANIFEST_VERSION_RE.match(valor):
-                failures.append(f"{where}.{extremo} no es una versión válida")
-                continue
-            ns_fallo = _check_namespace(valor, expected_schema, f"{where}.{extremo}")
-            if ns_fallo:
-                failures.append(ns_fallo)
-        if not isinstance(jump["breaking"], bool):
-            failures.append(f"{where}.breaking debe ser booleano")
-        if not isinstance(jump["changes"], dict):
-            failures.append(f"{where}.changes debe ser un objeto")
-            continue
-        for name, summary in jump["changes"].items():
-            if not isinstance(summary, str):
-                failures.append(f"{where}.changes.{name} debe ser texto")
-    return failures
-
-
-def check_template_manifest(
-    manifest_path: Path,
-    templates_dir: Path,
-    expected_schema: str = TEMPLATE_MANIFEST_SCHEMA,
-    verify_listing: bool = True,
-) -> list[str]:
-    """Valida un MANIFEST fuente de Skevi (#28 D1 + T09; familias ADR-028 y
-    ADR-032): esquema cerrado, digests vigentes y —para las familias planas—
-    listado exacto del directorio. Fail-closed, sin tracebacks."""
-    # Bajo ROOT: etiqueta real ("scripts/..."). Fuera de ROOT (tests): se
-    # degrada al nombre del directorio.
-    try:
-        dir_label = templates_dir.relative_to(ROOT).as_posix()
-    except ValueError:
-        dir_label = templates_dir.name
-    label = f"{dir_label}/{TEMPLATE_MANIFEST_NAME}"
-    try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except UnicodeDecodeError:
-        return [f"{label}: contenido no válido como UTF-8"]
-    except OSError:
-        return [f"{label}: no se pudo leer el archivo"]
-    except json.JSONDecodeError as exc:
-        return [
-            f"{label}: JSON inválido (línea {exc.lineno}, columna {exc.colno})"
-        ]
-    except RecursionError:
-        return [f"{label}: JSON inválido o demasiado anidado"]
-    failures = _validate_template_manifest(data, label, expected_schema)
-    if failures:
-        return failures
-    if not verify_listing:
-        # Familia corpus (ADR-032): se verifica el digest de cada archivo
-        # declarado, con ruta relativa al directorio del manifiesto y sin
-        # escapar de la raíz. Un archivo ausente es fallo, nunca omisión.
-        for name, digest in data["files"].items():
-            candidate = manifest_path.parent / name
-            try:
-                candidate.resolve().relative_to(ROOT.resolve())
-            except ValueError:
-                failures.append(
-                    f"{label}: files.{name} escapa de la raíz del proyecto"
-                )
-                continue
-            try:
-                observed = "sha256:" + hashlib.sha256(
-                    candidate.read_bytes()
-                ).hexdigest()
-            except OSError:
-                failures.append(f"{label}: no se pudo leer {name}")
-                continue
-            if observed != digest:
-                failures.append(
-                    f"{label}: digest desactualizado para {name} "
-                    "(¿cambió el canon sin bump?)"
-                )
-        return failures
-    try:
-        entries = sorted(templates_dir.iterdir(), key=lambda path: path.name)
-    except OSError:
-        return [f"{label}: no se pudo leer {dir_label}/"]
-    on_disk = []
-    for path in entries:
-        if not path.is_file():
-            continue
-        if path.name == TEMPLATE_MANIFEST_NAME:
-            continue
-        if path.is_symlink():
-            # Los symlinks no se siguen: la frontera de raíz vale también
-            # para el listado de plantillas (ronda adversarial, LOW).
-            failures.append(
-                f"{label}: symlink no permitido en {dir_label}/: {path.name}"
-            )
-            continue
-        if path.name not in LISTING_JUNK or path.name in data["files"]:
-            on_disk.append(path.name)
-    listed = sorted(data["files"])
-    if listed != on_disk:
-        missing = sorted(set(on_disk) - set(listed))
-        extra = sorted(set(listed) - set(on_disk))
-        if missing:
-            failures.append(
-                f"{label}: archivos sin entrada en el manifiesto: "
-                + ", ".join(missing)
-            )
-        if extra:
-            failures.append(
-                f"{label}: entradas sin archivo real: " + ", ".join(extra)
-            )
-        return failures
-    for name, digest in data["files"].items():
-        try:
-            actual = "sha256:" + hashlib.sha256(
-                (templates_dir / name).read_bytes()
-            ).hexdigest()
-        except OSError:
-            failures.append(f"{label}: no se pudo leer {name}")
-            continue
-        if digest != actual:
-            failures.append(
-                f"{label}: digest desactualizado para {name} "
-                "(¿cambió la plantilla sin bump?)"
-            )
-    return failures
-
-
 def discover() -> list[Path]:
     paths: list[Path] = []
     for path in ROOT.rglob("*"):
@@ -654,16 +445,6 @@ def count_text_lines(relative: Path) -> int | None:
     return len(text.splitlines())
 
 
-def check_corpus_manifest(manifest_path: Path) -> list[str]:
-    """Familia corpus (ADR-032): docs/MANIFEST.json declara el canon
-    (estándar + guía) y aquí se verifica su estructura y sus digests, sin
-    listado de directorio — docs/ anida subdirectorios y el contrato de
-    ADR-020 es plano por diseño."""
-    return check_template_manifest(
-        manifest_path, manifest_path.parent,
-        expected_schema=CORPUS_MANIFEST_SCHEMA, verify_listing=False)
-
-
 def check_reading_path() -> list[str]:
     """Suma las líneas de la ruta de lectura obligatoria (ADR-021).
 
@@ -676,6 +457,38 @@ def check_reading_path() -> list[str]:
     if not READING_PATH:
         return []
     failures: list[str] = []
+
+    # Coherencia root_markdown ↔ reading_path (issue #63): un Markdown
+    # operativo de raíz declarado por el adoptante —`AN-KLA.md` en el caso
+    # real— es lectura obligatoria del ejecutor; un presupuesto activo que
+    # no lo declara mide una ruta incompleta y da la falsa comodidad que
+    # #42 dejó y #63 encontró dos veces en adoptantes. Config contra
+    # config: sin detectar runtime, sin red. Desde gate/v11 (ADR-041) la
+    # exigencia cubre también la entrada del ejecutor: AGENTS.md y
+    # CLAUDE.md, si existen en la raíz, son lectura obligatoria con
+    # presupuesto activo — README queda fuera: cara humana, no entrada del
+    # ejecutor.
+    intrinsic = _SKEVI_DEFAULTS["ROOT_MARKDOWN"]
+    spine = set(READING_PATH["files"])
+    # README.md nunca entra: intrinsic siempre lo contiene y la exigencia
+    # de existencia condicional sólo cubre AGENTS/CLAUDE (ADR-041).
+    pendientes = sorted(ROOT_MARKDOWN - intrinsic)
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        # .is_file() sigue symlinks a diferencia de discover(), que los
+        # excluye: asimetría aceptada y conservadora — el presupuesto
+        # cuenta las líneas reales del destino; el límite por archivo de
+        # §3.4 es el que un symlink podría saltar (ronda gate/v11, LOW).
+        if (ROOT / name).is_file():
+            pendientes.append(name)
+    for name in pendientes:
+        if name not in spine:
+            failures.append(
+                f"ruta de lectura obligatoria: {name} es lectura "
+                "obligatoria del ejecutor y no figura en "
+                "«reading_path.files»; absórbelo en el presupuesto por "
+                "decisión escrita (la plantilla usage-guide documenta el "
+                "caso con límite 1400 como ejemplo)"
+            )
 
     def contar(name: str) -> int | None:
         path = ROOT / name
@@ -783,18 +596,29 @@ def main() -> int:
     manifest_path = ROOT / "templates" / "skevi" / TEMPLATE_MANIFEST_NAME
     if manifest_path.is_file():
         failures.extend(
-            check_template_manifest(manifest_path, manifest_path.parent)
+            check_templates.check_template_manifest(
+                manifest_path, manifest_path.parent)
         )
 
     scripts_manifest_path = ROOT / "scripts" / TEMPLATE_MANIFEST_NAME
     if scripts_manifest_path.is_file():
-        failures.extend(check_template_manifest(
+        failures.extend(check_templates.check_template_manifest(
             scripts_manifest_path, scripts_manifest_path.parent,
             expected_schema=SCRIPT_MANIFEST_SCHEMA))
 
     corpus_manifest_path = ROOT / "docs" / TEMPLATE_MANIFEST_NAME
     if corpus_manifest_path.is_file():
-        failures.extend(check_corpus_manifest(corpus_manifest_path))
+        failures.extend(
+            check_templates.check_corpus_manifest(corpus_manifest_path)
+        )
+
+    # Cuarta familia (ADR-040): los ADRs inmutables, con listado exacto
+    # del directorio plano.
+    adr_manifest_path = ROOT / "docs" / "adr" / TEMPLATE_MANIFEST_NAME
+    if adr_manifest_path.is_file():
+        failures.extend(check_templates.check_template_manifest(
+            adr_manifest_path, adr_manifest_path.parent,
+            expected_schema=check_templates.ADR_MANIFEST_SCHEMA))
 
     unexpected_markdown = sorted(
         path.name

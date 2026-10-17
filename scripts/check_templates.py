@@ -31,6 +31,7 @@ retirada. Copiable sin edición: stdlib-only, sin red, no muta archivos.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -43,7 +44,7 @@ from pathlib import Path
 # SCHEMA_NAMESPACE no es un error silencioso: _check_namespace falla
 # cerrado ante un esquema sin namespace registrado (ronda adversarial, MED).
 MANIFEST_SCHEMAS = {"skevi/template-manifest/v1", "skevi/script-manifest/v1",
-                    "skevi/corpus-manifest/v1"}
+                    "skevi/corpus-manifest/v1", "skevi/adr-manifest/v1"}
 INSTALL_SCHEMAS = {"skevi/template-install/v1", "skevi/script-install/v1",
                    "skevi/corpus-install/v1"}
 # Cada esquema exige su propio espacio de nombres de versión. Sin esto, un
@@ -58,6 +59,7 @@ SCHEMA_NAMESPACE = {
     "skevi/script-install/v1": "gate",
     "skevi/corpus-manifest/v1": "corpus",
     "skevi/corpus-install/v1": "corpus",
+    "skevi/adr-manifest/v1": "adr",
 }
 MANIFEST_KEYS = {"schema", "version", "generated_at", "files", "history"}
 INSTALL_KEYS = {"schema", "version", "files", "installed_at", "source",
@@ -245,6 +247,245 @@ def _detalle(texto: str) -> str:
     limpio = "".join(c if c.isprintable() else " " for c in texto)
     unido = " ".join(limpio.split())
     return unido[:300] + "…" if len(unido) > 300 else unido
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Validación estructural y cotejo contra disco de los MANIFEST fuente
+# (hogar desde gate/v9; ADR-039). Vivió en check_sizes.py — 870/870,
+# issue #61 — pese a que este archivo ya era el dueño del dominio. El
+# modelo de fallo es lista agregable, como exige el main() del gate de
+# tamaños; _load_manifest, arriba, falla al primer defecto porque es
+# entrada de CLI. Mismos mensajes que siempre: adoptantes y tests los
+# igualan.
+# ────────────────────────────────────────────────────────────────────────
+
+ROOT = Path(__file__).resolve().parent.parent
+# Basura del SO que el listado exacto ignora; cerrada, nunca config
+# (issue #59) — misma regla que rige el resto del listado del disco.
+LISTING_JUNK = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+TEMPLATE_MANIFEST_NAME = "MANIFEST.json"
+TEMPLATE_MANIFEST_SCHEMA = "skevi/template-manifest/v1"
+# Segunda familia (ADR-028): mismo check_template_manifest, sobre scripts/
+# en vez de templates/skevi/, validación estricta por directorio.
+SCRIPT_MANIFEST_SCHEMA = "skevi/script-manifest/v1"
+# Tercera familia (ADR-032): el canon normativo (estándar + guía) con
+# digests en docs/MANIFEST.json; sin listado de directorio, porque docs/
+# anida subdirectorios y el contrato de ADR-020 es plano por diseño.
+CORPUS_MANIFEST_SCHEMA = "skevi/corpus-manifest/v1"
+# Cuarta familia (ADR-040): los ADRs inmutables de docs/adr/, con listado
+# exacto — directorio plano, cada ADR nuevo exige entrada y bump. Sin
+# esquema de instalación: existe para verificar descargas, no como flujo
+# de adopción.
+ADR_MANIFEST_SCHEMA = "skevi/adr-manifest/v1"
+
+
+def _namespace_failure(version, expected_schema: str, where: str) -> str | None:
+    """Gemela coleccionista de _check_namespace: devuelve el fallo en vez
+    de levantarlo, porque aquí los defectos se acumulan para el gate que
+    consume la lista (ADR-007: diagnóstico con campos conocidos)."""
+    if not isinstance(version, str):
+        return None
+    # Fail-closed: esquema sin namespace registrado es olvido de
+    # mantenimiento, no motivo para omitir la comprobación.
+    expected_namespace = SCHEMA_NAMESPACE.get(expected_schema)
+    if expected_namespace is None:
+        return f"{where}: {expected_schema} no tiene namespace registrado"
+    if version.startswith(expected_namespace + "/"):
+        return None
+    return (f"{where}: version «{version}» no corresponde al espacio de "
+            f"nombres de {expected_schema} (se espera {expected_namespace}/vN)")
+
+
+def _validate_template_manifest(
+    data, label: str, expected_schema: str = TEMPLATE_MANIFEST_SCHEMA
+) -> list[str]:
+    """Esquema cerrado del MANIFEST (formato de ADR-020, familias en ADR-028).
+    Falla por campo, con motivo fijo, sin volcar contenido. Validación
+    estricta: cada manifiesto se valida contra un único esquema esperado,
+    no contra cualquiera que Skevi reconozca — un manifiesto de scripts no
+    puede colarse donde se espera uno de plantillas."""
+    failures: list[str] = []
+    if not isinstance(data, dict):
+        return [f"{label}: la raíz debe ser un objeto"]
+    missing = sorted(MANIFEST_KEYS - set(data))
+    if missing:
+        return [f"{label}: campos obligatorios ausentes: {', '.join(missing)}"]
+    if data.get("schema") != expected_schema:
+        failures.append(
+            f"{label}: schema desconocido (se espera {expected_schema})"
+        )
+    unknown = sorted(set(data) - MANIFEST_KEYS)
+    if unknown:
+        failures.append(
+            f"{label}: campo desconocido: {', '.join(unknown)}"
+        )
+        return failures
+    if not isinstance(data["version"], str) \
+            or not VERSION_RE.match(data["version"]):
+        failures.append(f"{label}: version no coincide con <namespace>/v<n>")
+    else:
+        ns_fallo = _namespace_failure(data["version"], expected_schema, label)
+        if ns_fallo:
+            failures.append(ns_fallo)
+    if not isinstance(data["generated_at"], str) or not data["generated_at"]:
+        failures.append(f"{label}: generated_at debe ser texto con fecha")
+    if not isinstance(data["files"], dict) or not data["files"]:
+        failures.append(
+            f"{label}: files debe ser un objeto con entradas"
+        )
+        return failures
+    for name, digest in data["files"].items():
+        if not isinstance(digest, str) or not DIGEST_RE.match(digest):
+            failures.append(
+                f"{label}: files.{name} no es un digest con formato "
+                "sha256:<hex>"
+            )
+    if not isinstance(data["history"], list):
+        failures.append(f"{label}: history debe ser una lista")
+        return failures
+    for index, jump in enumerate(data["history"]):
+        where = f"{label}: history[{index}]"
+        if not isinstance(jump, dict) or set(jump) != HISTORY_KEYS:
+            failures.append(
+                f"{where} debe tener exactamente from/to/breaking/changes"
+            )
+            continue
+        for extremo in ("from", "to"):
+            valor = jump[extremo]
+            if extremo == "from" and valor is None:
+                continue
+            if not isinstance(valor, str) or not VERSION_RE.match(valor):
+                failures.append(f"{where}.{extremo} no es una versión válida")
+                continue
+            ns_fallo = _namespace_failure(
+                valor, expected_schema, f"{where}.{extremo}")
+            if ns_fallo:
+                failures.append(ns_fallo)
+        if not isinstance(jump["breaking"], bool):
+            failures.append(f"{where}.breaking debe ser booleano")
+        if not isinstance(jump["changes"], dict):
+            failures.append(f"{where}.changes debe ser un objeto")
+            continue
+        for name, summary in jump["changes"].items():
+            if not isinstance(summary, str):
+                failures.append(f"{where}.changes.{name} debe ser texto")
+    return failures
+
+
+def check_template_manifest(
+    manifest_path: Path,
+    templates_dir: Path,
+    expected_schema: str = TEMPLATE_MANIFEST_SCHEMA,
+    verify_listing: bool = True,
+) -> list[str]:
+    """Valida un MANIFEST fuente de Skevi (#28 D1 + T09; familias ADR-028 y
+    ADR-032): esquema cerrado, digests vigentes y —para las familias planas—
+    listado exacto del directorio. Fail-closed, sin tracebacks."""
+    # Bajo ROOT: etiqueta real ("scripts/..."). Fuera de ROOT (tests): se
+    # degrada al nombre del directorio.
+    try:
+        dir_label = templates_dir.relative_to(ROOT).as_posix()
+    except ValueError:
+        dir_label = templates_dir.name
+    label = f"{dir_label}/{TEMPLATE_MANIFEST_NAME}"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        return [f"{label}: contenido no válido como UTF-8"]
+    except OSError:
+        return [f"{label}: no se pudo leer el archivo"]
+    except json.JSONDecodeError as exc:
+        return [
+            f"{label}: JSON inválido (línea {exc.lineno}, columna {exc.colno})"
+        ]
+    except RecursionError:
+        return [f"{label}: JSON inválido o demasiado anidado"]
+    failures = _validate_template_manifest(data, label, expected_schema)
+    if failures:
+        return failures
+    if not verify_listing:
+        # Familia corpus (ADR-032): se verifica el digest de cada archivo
+        # declarado, con ruta relativa al directorio del manifiesto y sin
+        # escapar de la raíz. Un archivo ausente es fallo, nunca omisión.
+        for name, digest in data["files"].items():
+            candidate = manifest_path.parent / name
+            try:
+                candidate.resolve().relative_to(ROOT.resolve())
+            except ValueError:
+                failures.append(
+                    f"{label}: files.{name} escapa de la raíz del proyecto"
+                )
+                continue
+            try:
+                observed = "sha256:" + hashlib.sha256(
+                    candidate.read_bytes()
+                ).hexdigest()
+            except OSError:
+                failures.append(f"{label}: no se pudo leer {name}")
+                continue
+            if observed != digest:
+                failures.append(
+                    f"{label}: digest desactualizado para {name} "
+                    "(¿cambió el canon sin bump?)"
+                )
+        return failures
+    try:
+        entries = sorted(templates_dir.iterdir(), key=lambda path: path.name)
+    except OSError:
+        return [f"{label}: no se pudo leer {dir_label}/"]
+    on_disk = []
+    for path in entries:
+        if not path.is_file():
+            continue
+        if path.name == TEMPLATE_MANIFEST_NAME:
+            continue
+        if path.is_symlink():
+            # Los symlinks no se siguen: la frontera de raíz vale también
+            # para el listado de plantillas (ronda adversarial, LOW).
+            failures.append(
+                f"{label}: symlink no permitido en {dir_label}/: {path.name}"
+            )
+            continue
+        if path.name not in LISTING_JUNK or path.name in data["files"]:
+            on_disk.append(path.name)
+    listed = sorted(data["files"])
+    if listed != on_disk:
+        missing = sorted(set(on_disk) - set(listed))
+        extra = sorted(set(listed) - set(on_disk))
+        if missing:
+            failures.append(
+                f"{label}: archivos sin entrada en el manifiesto: "
+                + ", ".join(missing)
+            )
+        if extra:
+            failures.append(
+                f"{label}: entradas sin archivo real: " + ", ".join(extra)
+            )
+        return failures
+    for name, digest in data["files"].items():
+        try:
+            actual = "sha256:" + hashlib.sha256(
+                (templates_dir / name).read_bytes()
+            ).hexdigest()
+        except OSError:
+            failures.append(f"{label}: no se pudo leer {name}")
+            continue
+        if digest != actual:
+            failures.append(
+                f"{label}: digest desactualizado para {name} "
+                "(¿cambió la plantilla sin bump?)"
+            )
+    return failures
+
+
+def check_corpus_manifest(manifest_path: Path) -> list[str]:
+    """Familia corpus (ADR-032): docs/MANIFEST.json declara el canon
+    (estándar + guía) y aquí se verifica su estructura y sus digests, sin
+    listado de directorio — docs/ anida subdirectorios y el contrato de
+    ADR-020 es plano por diseño."""
+    return check_template_manifest(
+        manifest_path, manifest_path.parent,
+        expected_schema=CORPUS_MANIFEST_SCHEMA, verify_listing=False)
 
 
 def main(argv=None) -> int:
