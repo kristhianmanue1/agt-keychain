@@ -32,11 +32,18 @@ aislamiento o sincronización, ni incorporar esta sesión a AN-KLA.
 ## F1 — adaptación decidida
 
 Origen fijado:
-`https://github.com/kristhianmanue1/skevi@d7a80b26962cd66a806943ff46f779de14c16708`.
-La rama `main` local y la referencia remota consultada coincidían al copiar.
-Los registros de `.skevi/` declaran `plantillas/v10`, `gate/v8` y `corpus/v4`.
-Los scripts y documentos normativos se copian sin editar; las decisiones
-locales viven en `.skevi/usage-guide.md` y `skevi-gate.json`.
+`https://github.com/kristhianmanue1/skevi@1837e64f7e4cdc9d367bda7b2b32a5d18a6df92c`
+(v1.5.0; re-copia de 2026-10-17 sobre la instalación inicial
+`d7a80b26962cd66a806943ff46f779de14c16708` del 2026-10-08). Los registros de
+`.skevi/` declaran `plantillas/v14`, `gate/v11` y `corpus/v5`. Los scripts se
+re-copiaron juntos —desde gate/v9 son una sola unidad de copia, con la
+validación de manifiestos en `check_templates.py`— y los documentos
+normativos se copian sin editar; las decisiones locales viven en
+`.skevi/usage-guide.md` y `skevi-gate.json`. El corpus/v5 trae la frontera de
+memoria agnóstica (PROP-011) en `05-memoria-del-agente.md`; su crecimiento
+obligó a subir el presupuesto de ruta de lectura a 1620
+([ADR-021](adr/ADR-021-presupuesto-lectura-1620.md)), verificado por la ronda
+adversarial de `docs/reviews/2026-10-17-skevi-v150-ronda-adversarial.md`.
 Dos ADR y un antecedente histórico se copiaron como apoyo de procedencia;
 sus enlaces hacia otros documentos históricos se ajustaron a URLs del commit
 fijado para evitar referencias locales rotas. No forman parte del manifiesto
